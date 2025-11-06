@@ -1,0 +1,13 @@
+app:
+  name: "transactions-service"
+
+grpc:
+  port: ":8080"
+  enable_reflection: true
+
+cache:
+  ttl: "5m"
+
+migration:
+  batch_size: 1000
+  rate_limit: "100ms"

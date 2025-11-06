@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package transactions.v1;
+
+option go_package = "github.com/kpozdnikin/go-sui-test/app/pkg/transactions/v1;transactionsv1";
+
+import "google/protobuf/timestamp.proto";
+
+service TransactionsService {
+  // GetTransactionsByAddress returns CHIRP token transactions for a specific address
+  rpc GetTransactionsByAddress(GetTransactionsByAddressRequest) returns (GetTransactionsByAddressResponse) {}
+  
+  // GetWeeklyStatistics returns token statistics for the last week
+  rpc GetWeeklyStatistics(GetWeeklyStatisticsRequest) returns (GetWeeklyStatisticsResponse) {}
+  
+  // GetStatistics returns token statistics for a custom time period
+  rpc GetStatistics(GetStatisticsRequest) returns (GetStatisticsResponse) {}
+  
+  // SyncTransactions triggers synchronization of transactions from blockchain
+  rpc SyncTransactions(SyncTransactionsRequest) returns (SyncTransactionsResponse) {}
+}
+
+message GetTransactionsByAddressRequest {
+  string address = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetTransactionsByAddressResponse {
+  repeated ChirpTransaction transactions = 1;
+  int32 total = 2;
+}
+
+message GetWeeklyStatisticsRequest {}
+
+message GetWeeklyStatisticsResponse {
+  TokenStatistics statistics = 1;
+}
+
+message GetStatisticsRequest {
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+}
+
+message GetStatisticsResponse {
+  TokenStatistics statistics = 1;
+}
+
+message SyncTransactionsRequest {}
+
+message SyncTransactionsResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ChirpTransaction {
+  string id = 1;
+  string digest = 2;
+  string sender = 3;
+  string recipient = 4;
+  string amount = 5;
+  string transaction_type = 6;
+  uint64 checkpoint = 7;
+  google.protobuf.Timestamp timestamp = 8;
+  bool success = 9;
+  string gas_fee = 10;
+}
+
+message TokenStatistics {
+  string total_claimed = 1;
+  string total_transferred = 2;
+  string total_staked = 3;
+  string total_bought = 4;
+  string total_sold = 5;
+  int64 unique_holders = 6;
+  int64 total_tx_count = 7;
+  google.protobuf.Timestamp period_start = 8;
+  google.protobuf.Timestamp period_end = 9;
+}

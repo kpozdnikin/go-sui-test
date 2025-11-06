@@ -1,0 +1,14 @@
+command: ["/usr/bin/go-sui-test"]
+args: ["--config", "/config/config.yaml"]
+
+startupProbe:
+  grpc:
+    port: 8080
+
+livenessProbe:
+  grpc:
+    port: 8080
+
+readinessProbe:
+  grpc:
+    port: 8080

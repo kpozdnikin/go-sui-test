@@ -1,0 +1,10 @@
+version: v2
+name: github.com/kpozdnikin/go-sui-test
+lint:
+  use:
+    - DEFAULT
+breaking:
+  use:
+    - FILE
+deps:
+  - buf.build/bufbuild/protovalidate

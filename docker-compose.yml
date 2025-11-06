@@ -1,0 +1,13 @@
+services:
+  db:
+    image: "postgres:16.1-alpine3.18"
+    volumes:
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:z,ro
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: "admin"
+    ports:
+      - "5432:5432"
+volumes:
+  db-data:
+  datastore:

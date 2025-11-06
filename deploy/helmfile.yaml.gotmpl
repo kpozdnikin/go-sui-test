@@ -1,0 +1,58 @@
+environments:
+  "{{ .Environment.Name }}":
+    values:
+      - values/common.yaml
+
+---
+# Detect CI mode. If it's disabled some required values are replaced with dummy ones
+{{ $isCI := eq (env "CI") "true" }}
+
+# Common helm chart
+{{ $chart := "reusable-helm-chart" }}
+# Version for reusable helm chart
+{{ $version := "1.7.0" }}
+# Random folder for downloaded reusable helm chart
+{{ $unpackPrefix := randInt 1000000 9999999 }}
+
+repositories:
+  - name: chirpwireless
+    url: https://chirpwireless.github.io/reusable-helm-chart
+
+helmDefaults:
+  wait: true
+  atomic: true
+  force: true
+  timeout: 600
+  historyMax: 5
+  createNamespace: false
+  # devel: true
+
+releases:
+  - name: subscription-service
+    chart: charts/{{ $unpackPrefix }}/{{ $chart }}
+    installed: true
+    {{- if $isCI }}
+    labels:
+      github/commit.sha: {{ env "GITHUB_SHA" }}
+    {{- end }}
+    missingFileHandler: Warn
+    values:
+      - ./values/subscription.yaml
+      - ./values/subscription.yaml.gotmpl
+      - ./values/common.yaml
+      - ./values/common.yaml.gotmpl
+      - ./values/{{ .Environment.Name }}/subscription.yaml
+    set:
+      - name: image.tag
+        value: {{ requiredEnv "VERSION" }}
+    hooks:
+      - events: ['prepare']
+        command: "helm"
+        args: ["fetch", "chirpwireless/{{ $chart }}", "--version={{ $version }}", "--untar", "-d", "charts/{{ $unpackPrefix }}"]
+      - events: ['prepare']
+        command: "perl"
+        args:
+        - "-i"
+        - "-pe"
+        - 's/^appVersion:.*$/appVersion: "{{ requiredEnv "VERSION" }}"/g'
+        - "charts/{{ $unpackPrefix }}/{{ $chart }}/Chart.yaml"

@@ -1,0 +1,29 @@
+app:
+  name: "chirp-transactions-service"
+  version: "1.0.0"
+
+grpc:
+  port: ":50051"
+  enable_reflection: true
+
+http:
+  port: ":8080"
+
+migration:
+  batch_size: 100
+  rate_limit: "100ms"
+
+cache:
+  ttl: "5m"
+
+postgresql:
+  host: "localhost"
+  port: "5432"
+  user: "gwuser"
+  password: "gwpass"
+  dbname: "transactions"
+  sslmode: "disable"
+
+subscription:
+  sync_interval: "5m"
+  batch_size: 100
