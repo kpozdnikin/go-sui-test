@@ -63,7 +63,7 @@ func main() {
 
 	// Start background sync (optional - can be triggered via API)
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(cfg.Sync.Interval)
 		defer ticker.Stop()
 
 		for range ticker.C {
