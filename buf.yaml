@@ -1,4 +1,6 @@
 version: v2
+modules:
+  - path: app
 name: github.com/kpozdnikin/go-sui-test
 lint:
   use:
@@ -6,5 +8,3 @@ lint:
 breaking:
   use:
     - FILE
-deps:
-  - buf.build/bufbuild/protovalidate
