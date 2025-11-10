@@ -4,7 +4,7 @@ go 1.23.7
 
 require (
 	github.com/ilyakaznacheev/cleanenv v1.5.0
-	github.com/pkg/errors <v0 class="9 1"></v0>
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/stripe/stripe-go/v76 v76.11.0
 	go.flipt.io/flipt-client v1.0.0

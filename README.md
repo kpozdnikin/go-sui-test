@@ -114,7 +114,26 @@ GET /api/v1/statistics?start=2024-01-01T00:00:00Z&end=2024-01-31T23:59:59Z
 #### Запустить синхронизацию
 
 ```bash
-POST /api/v1/sync
+REM 1. Создать конфиг (если ещё не создан)
+copy app\config\config.yaml.example app\config\config.yaml
+
+REM 2. Запустить PostgreSQL
+docker-compose up -d
+
+REM 3. Перейти в папку app
+cd app
+
+REM 4. Сгенерировать protobuf (из папки app, но указываем путь к корню)
+cd ..
+buf generate
+cd app
+
+REM 5. Установить зависимости
+go mod download
+go mod tidy
+
+REM 6. Запустить сервис
+go run cmd\go-sui-test\main.go
 ```
 
 #### Health check
