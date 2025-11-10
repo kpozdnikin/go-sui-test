@@ -3,13 +3,11 @@ managed:
   enabled: true
 plugins:
   - local: protoc-gen-go
-    out: app
+    out: app/pkg
     opt:
       - paths=source_relative
-      - module=github.com/kpozdnikin/go-sui-test/app
   - local: protoc-gen-go-grpc
-    out: app
+    out: app/pkg
     opt:
       - paths=source_relative
-      - module=github.com/kpozdnikin/go-sui-test/app
 

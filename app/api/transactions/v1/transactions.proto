@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package transactions.v1;
 
-option go_package = "github.com/kpozdnikin/go-sui-test/app/pkg/transactions/v1;transactionsv1";
+option go_package = "transactions/v1;transactionsv1";
 
 import "google/protobuf/timestamp.proto";
 

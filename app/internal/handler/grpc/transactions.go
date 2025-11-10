@@ -7,7 +7,7 @@ import (
 
 	"github.com/kpozdnikin/go-sui-test/app/internal/domain"
 	"github.com/kpozdnikin/go-sui-test/app/internal/service"
-	pb "github.com/kpozdnikin/go-sui-test/app/pkg/transactions/v1"
+	pb "github.com/kpozdnikin/go-sui-test/app/pkg/api/transactions/v1"
 )
 
 type TransactionsHandler struct {
