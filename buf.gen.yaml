@@ -4,8 +4,12 @@ managed:
 plugins:
   - local: protoc-gen-go
     out: app
-    opt: paths=source_relative
+    opt:
+      - paths=source_relative
+      - module=github.com/kpozdnikin/go-sui-test/app
   - local: protoc-gen-go-grpc
     out: app
-    opt: paths=source_relative
+    opt:
+      - paths=source_relative
+      - module=github.com/kpozdnikin/go-sui-test/app
 
