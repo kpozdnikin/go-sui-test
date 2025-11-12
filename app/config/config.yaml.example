@@ -20,3 +20,10 @@ postgresql:
 sync:
   interval: "5m"
   batch_size: 100
+  initial_sync_days: 1  # Number of days to sync on first run (0 = sync entire blockchain)
+
+monitoring:
+  addresses:
+    - "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"  # Example address 1
+    - "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"  # Example address 2
+  # Or use ENV: MONITORING_ADDRESSES="0xaddr1,0xaddr2,0xaddr3"

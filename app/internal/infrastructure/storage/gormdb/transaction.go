@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -153,6 +154,8 @@ func (r *ChirpTransactionRepository) GetTransactionsByTimeRange(ctx context.Cont
 
 // GetStatistics calculates token statistics for a given time period
 func (r *ChirpTransactionRepository) GetStatistics(ctx context.Context, start, end time.Time) (*domain.TokenStatistics, error) {
+	log.Printf("DB: GetStatistics called for period %s to %s", start.Format(time.RFC3339), end.Format(time.RFC3339))
+	
 	stats := &domain.TokenStatistics{
 		PeriodStart: start,
 		PeriodEnd:   end,
@@ -160,12 +163,15 @@ func (r *ChirpTransactionRepository) GetStatistics(ctx context.Context, start, e
 
 	// Get total transaction count
 	var totalCount int64
+	
 	if err := r.db.WithContext(ctx).Model(&ChirpTransactionModel{}).
 		Where("timestamp >= ? AND timestamp <= ? AND success = ?", start, end, true).
 		Count(&totalCount).Error; err != nil {
+		log.Printf("DB: Error counting transactions: %v", err)
 		return nil, fmt.Errorf("counting transactions: %w", err)
 	}
 	stats.TotalTxCount = totalCount
+	log.Printf("DB: Found %d total transactions", totalCount)
 
 	// Get unique holders count
 	var uniqueHolders int64
@@ -173,9 +179,11 @@ func (r *ChirpTransactionRepository) GetStatistics(ctx context.Context, start, e
 		Where("timestamp >= ? AND timestamp <= ?", start, end).
 		Distinct("sender").
 		Count(&uniqueHolders).Error; err != nil {
+		log.Printf("DB: Error counting unique holders: %v", err)
 		return nil, fmt.Errorf("counting unique holders: %w", err)
 	}
 	stats.UniqueHolders = uniqueHolders
+	log.Printf("DB: Found %d unique holders", uniqueHolders)
 
 	// Aggregate amounts by transaction type
 	type AggResult struct {
@@ -189,8 +197,10 @@ func (r *ChirpTransactionRepository) GetStatistics(ctx context.Context, start, e
 		Where("timestamp >= ? AND timestamp <= ? AND success = ?", start, end, true).
 		Group("transaction_type").
 		Scan(&results).Error; err != nil {
+		log.Printf("DB: Error aggregating amounts: %v", err)
 		return nil, fmt.Errorf("aggregating amounts: %w", err)
 	}
+	log.Printf("DB: Aggregation results: %+v", results)
 
 	// Map results to statistics
 	for _, result := range results {
@@ -225,16 +235,29 @@ func (r *ChirpTransactionRepository) GetStatistics(ctx context.Context, start, e
 		stats.TotalSold = "0"
 	}
 
+	log.Printf("DB: Final statistics: TxCount=%d, Holders=%d, Claimed=%s, Transferred=%s, Staked=%s, Bought=%s, Sold=%s",
+		stats.TotalTxCount, stats.UniqueHolders, stats.TotalClaimed, stats.TotalTransferred, 
+		stats.TotalStaked, stats.TotalBought, stats.TotalSold)
+
 	return stats, nil
 }
 
 // GetLatestCheckpoint retrieves the latest checkpoint number from stored transactions
 func (r *ChirpTransactionRepository) GetLatestCheckpoint(ctx context.Context) (uint64, error) {
-	var checkpoint uint64
+	var checkpoint *uint64
 	if err := r.db.WithContext(ctx).Model(&ChirpTransactionModel{}).
 		Select("MAX(checkpoint)").
 		Scan(&checkpoint).Error; err != nil {
+		log.Printf("DB: Error getting latest checkpoint: %v", err)
 		return 0, fmt.Errorf("getting latest checkpoint: %w", err)
 	}
-	return checkpoint, nil
+	
+	// If table is empty, MAX returns NULL
+	if checkpoint == nil {
+		log.Println("DB: No checkpoints found in database (table is empty), starting from 0")
+		return 0, nil
+	}
+	
+	log.Printf("DB: Latest checkpoint in database: %d", *checkpoint)
+	return *checkpoint, nil
 }

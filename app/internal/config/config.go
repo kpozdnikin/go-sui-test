@@ -15,6 +15,7 @@ type (
 		HTTP       `yaml:"http" env-prefix:"HTTP_"`
 		PostgreSQL `yaml:"postgresql" env-prefix:"POSTGRESQL_"`
 		Sync       `yaml:"sync" env-prefix:"SYNC_"`
+		Monitoring `yaml:"monitoring" env-prefix:"MONITORING_"`
 	}
 
 	App struct {
@@ -41,8 +42,13 @@ type (
 	}
 
 	Sync struct {
-		Interval  time.Duration `yaml:"interval" env:"INTERVAL"`
-		BatchSize int           `yaml:"batch_size" env:"BATCH_SIZE"`
+		Interval              time.Duration `yaml:"interval" env:"INTERVAL"`
+		BatchSize             int           `yaml:"batch_size" env:"BATCH_SIZE"`
+		InitialSyncDays       int           `yaml:"initial_sync_days" env:"INITIAL_SYNC_DAYS"`
+	}
+
+	Monitoring struct {
+		Addresses []string `yaml:"addresses" env:"ADDRESSES" env-separator:","`
 	}
 )
 

@@ -15,10 +15,12 @@ import (
 
 // ChirpTransactionService handles business logic for CHIRP token transactions
 type ChirpTransactionService struct {
-	repo       *gormdb.ChirpTransactionRepository
-	suiClient  *blockchain.SuiClient
-	chirpToken string
-	claimAddr  string
+	repo               *gormdb.ChirpTransactionRepository
+	suiClient          *blockchain.SuiClient
+	chirpToken         string
+	claimAddr          string
+	initialSyncDays    int
+	monitoringAddresses []string
 }
 
 func NewChirpTransactionService(
@@ -26,100 +28,233 @@ func NewChirpTransactionService(
 	suiClient *blockchain.SuiClient,
 	chirpToken string,
 	claimAddr string,
+	initialSyncDays int,
+	monitoringAddresses []string,
 ) *ChirpTransactionService {
 	return &ChirpTransactionService{
-		repo:       repo,
-		suiClient:  suiClient,
-		chirpToken: chirpToken,
-		claimAddr:  claimAddr,
+		repo:               repo,
+		suiClient:          suiClient,
+		chirpToken:         chirpToken,
+		claimAddr:          claimAddr,
+		initialSyncDays:    initialSyncDays,
+		monitoringAddresses: monitoringAddresses,
 	}
 }
 
 // SyncTransactions synchronizes transactions from SUI blockchain to database
 func (s *ChirpTransactionService) SyncTransactions(ctx context.Context) error {
-	log.Println("Starting transaction synchronization...")
-
-	// Get latest checkpoint from database
-	latestDBCheckpoint, err := s.repo.GetLatestCheckpoint(ctx)
-	if err != nil {
-		return fmt.Errorf("getting latest checkpoint from DB: %w", err)
+	syncStart := time.Now()
+	log.Println("========================================")
+	log.Println("Starting transaction synchronization using address-based query...")
+	
+	// Build list of addresses to monitor
+	addressesToMonitor := s.buildMonitoringAddressList()
+	log.Printf("Monitoring %d addresses:", len(addressesToMonitor))
+	for i, addr := range addressesToMonitor {
+		log.Printf("  %d. %s", i+1, addr)
 	}
 
-	// Get latest checkpoint from blockchain
-	latestChainCheckpoint, err := s.suiClient.GetLatestCheckpoint(ctx)
-	if err != nil {
-		return fmt.Errorf("getting latest checkpoint from chain: %w", err)
-	}
+	totalChirpTransactions := 0
 
-	log.Printf("DB checkpoint: %d, Chain checkpoint: %d", latestDBCheckpoint, latestChainCheckpoint)
-
-	// If we're up to date, nothing to do
-	if latestDBCheckpoint >= latestChainCheckpoint {
-		log.Println("Already up to date")
-		return nil
-	}
-
-	// Sync checkpoints in batches
-	startCheckpoint := latestDBCheckpoint + 1
-	batchSize := uint64(100)
-
-	for checkpoint := startCheckpoint; checkpoint <= latestChainCheckpoint; checkpoint += batchSize {
-		endCheckpoint := checkpoint + batchSize - 1
-		if endCheckpoint > latestChainCheckpoint {
-			endCheckpoint = latestChainCheckpoint
+	// Query transactions for each address
+	for _, address := range addressesToMonitor {
+		log.Printf("Processing address: %s", address)
+		
+		// Query transactions FROM address
+		fromCount, err := s.syncTransactionsByAddress(ctx, address, true)
+		if err != nil {
+			log.Printf("ERROR: Failed to sync FROM transactions for %s: %v", address, err)
+		} else {
+			totalChirpTransactions += fromCount
+			log.Printf("  Found %d CHIRP transactions FROM address", fromCount)
 		}
 
-		if err := s.syncCheckpointRange(ctx, checkpoint, endCheckpoint); err != nil {
-			log.Printf("Error syncing checkpoints %d-%d: %v", checkpoint, endCheckpoint, err)
-			// Continue with next batch
+		// Query transactions TO address
+		toCount, err := s.syncTransactionsByAddress(ctx, address, false)
+		if err != nil {
+			log.Printf("ERROR: Failed to sync TO transactions for %s: %v", address, err)
+		} else {
+			totalChirpTransactions += toCount
+			log.Printf("  Found %d CHIRP transactions TO address", toCount)
 		}
-
-		log.Printf("Synced checkpoints %d-%d", checkpoint, endCheckpoint)
+		
+		log.Printf("  Total for this address: %d CHIRP transactions", fromCount+toCount)
 	}
 
-	log.Println("Transaction synchronization completed")
+	log.Printf("========================================")
+	log.Printf("Synchronization completed in %v", time.Since(syncStart))
+	log.Printf("Total CHIRP transactions saved: %d", totalChirpTransactions)
+	log.Println("========================================")
 	return nil
 }
 
-func (s *ChirpTransactionService) syncCheckpointRange(ctx context.Context, start, end uint64) error {
+// buildMonitoringAddressList creates a list of addresses to monitor
+func (s *ChirpTransactionService) buildMonitoringAddressList() []string {
+	addresses := make([]string, 0)
+	
+	// Add claim address if not empty
+	if s.claimAddr != "" {
+		addresses = append(addresses, s.claimAddr)
+	}
+	
+	// Add configured monitoring addresses
+	for _, addr := range s.monitoringAddresses {
+		// Skip empty addresses and duplicates
+		if addr == "" {
+			continue
+		}
+		isDuplicate := false
+		for _, existing := range addresses {
+			if existing == addr {
+				isDuplicate = true
+				break
+			}
+		}
+		if !isDuplicate {
+			addresses = append(addresses, addr)
+		}
+	}
+	
+	return addresses
+}
+
+// syncTransactionsByAddress syncs transactions for a specific address
+func (s *ChirpTransactionService) syncTransactionsByAddress(ctx context.Context, address string, isFrom bool) (int, error) {
+	var cursor *string
+	totalCount := 0
+	limit := 50
+
+	for {
+		// Query transactions
+		var response *blockchain.TransactionQueryResponse
+		var err error
+		
+		if isFrom {
+			response, err = s.suiClient.QueryTransactionsByAddress(ctx, address, cursor, limit)
+		} else {
+			// For TO address, we need a different filter
+			response, err = s.queryTransactionsToAddress(ctx, address, cursor, limit)
+		}
+		
+		if err != nil {
+			return totalCount, fmt.Errorf("querying transactions: %w", err)
+		}
+
+		// Process each transaction
+		for _, txBlock := range response.Data {
+			// Check if already exists
+			existing, err := s.repo.GetTransactionByDigest(ctx, txBlock.Digest)
+			if err != nil {
+				log.Printf("ERROR: Failed to check existing transaction %s: %v", txBlock.Digest, err)
+				continue
+			}
+			if existing != nil {
+				continue // Already processed
+			}
+
+			// Parse timestamp
+			var timestamp time.Time
+			if txBlock.TimestampMs != nil {
+				timestamp, err = s.parseTimestamp(*txBlock.TimestampMs)
+				if err != nil {
+					log.Printf("ERROR: Failed to parse timestamp for %s: %v", txBlock.Digest, err)
+					continue
+				}
+			}
+
+			// Extract CHIRP transactions
+			var checkpoint uint64
+			if txBlock.Checkpoint != nil {
+				fmt.Sscanf(*txBlock.Checkpoint, "%d", &checkpoint)
+			}
+			
+			chirpTxs := s.extractChirpTransactions(&txBlock, checkpoint, timestamp)
+			
+			// Save to database
+			if len(chirpTxs) > 0 {
+				log.Printf("Saving %d CHIRP transaction(s) from tx %s", len(chirpTxs), txBlock.Digest)
+				if err := s.repo.CreateTransactionsBatch(ctx, chirpTxs); err != nil {
+					log.Printf("ERROR: Failed to save transactions: %v", err)
+				} else {
+					totalCount += len(chirpTxs)
+				}
+			}
+		}
+
+		// Check if there are more pages
+		if !response.HasNextPage || response.NextCursor == nil {
+			break
+		}
+		cursor = response.NextCursor
+		
+		log.Printf("Processed %d transactions so far, fetching next page...", totalCount)
+		time.Sleep(500 * time.Millisecond) // Rate limiting
+	}
+
+	return totalCount, nil
+}
+
+// queryTransactionsToAddress queries transactions TO a specific address
+func (s *ChirpTransactionService) queryTransactionsToAddress(ctx context.Context, address string, cursor *string, limit int) (*blockchain.TransactionQueryResponse, error) {
+	return s.suiClient.QueryTransactionsToAddress(ctx, address, cursor, limit)
+}
+
+func (s *ChirpTransactionService) syncCheckpointRange(ctx context.Context, start, end uint64) (int, int, error) {
+	totalTxCount := 0
+	chirpTxCount := 0
+
 	for checkpoint := start; checkpoint <= end; checkpoint++ {
 		cpData, err := s.suiClient.GetCheckpoint(ctx, checkpoint)
 		if err != nil {
-			return fmt.Errorf("getting checkpoint %d: %w", checkpoint, err)
+			log.Printf("ERROR: Failed to get checkpoint %d: %v", checkpoint, err)
+			return totalTxCount, chirpTxCount, fmt.Errorf("getting checkpoint %d: %w", checkpoint, err)
+		}
+
+		txInCheckpoint := len(cpData.Transactions)
+		totalTxCount += txInCheckpoint
+
+		if txInCheckpoint > 0 {
+			log.Printf("Checkpoint %d: %d transactions", checkpoint, txInCheckpoint)
 		}
 
 		// Process each transaction in the checkpoint
 		for _, txDigest := range cpData.Transactions {
-			if err := s.processTransaction(ctx, txDigest, checkpoint, cpData.TimestampMs); err != nil {
-				log.Printf("Error processing transaction %s: %v", txDigest, err)
+			chirpCount, err := s.processTransaction(ctx, txDigest, checkpoint, cpData.TimestampMs)
+			if err != nil {
+				log.Printf("ERROR: Failed to process transaction %s in checkpoint %d: %v", txDigest, checkpoint, err)
 				// Continue with next transaction
+			} else {
+				chirpTxCount += chirpCount
+				if chirpCount > 0 {
+					log.Printf("Found %d CHIRP transaction(s) in tx %s", chirpCount, txDigest)
+				}
 			}
 		}
 	}
 
-	return nil
+	return totalTxCount, chirpTxCount, nil
 }
 
-func (s *ChirpTransactionService) processTransaction(ctx context.Context, digest string, checkpoint uint64, timestampMs string) error {
+func (s *ChirpTransactionService) processTransaction(ctx context.Context, digest string, checkpoint uint64, timestampMs string) (int, error) {
 	// Check if transaction already exists
 	existing, err := s.repo.GetTransactionByDigest(ctx, digest)
 	if err != nil {
-		return fmt.Errorf("checking existing transaction: %w", err)
+		return 0, fmt.Errorf("checking existing transaction: %w", err)
 	}
 	if existing != nil {
-		return nil // Already processed
+		return 0, nil // Already processed
 	}
 
 	// Get transaction details
 	txBlock, err := s.suiClient.GetTransactionBlock(ctx, digest)
 	if err != nil {
-		return fmt.Errorf("getting transaction block: %w", err)
+		return 0, fmt.Errorf("getting transaction block: %w", err)
 	}
 
 	// Parse timestamp
 	timestamp, err := s.parseTimestamp(timestampMs)
 	if err != nil {
-		return fmt.Errorf("parsing timestamp: %w", err)
+		return 0, fmt.Errorf("parsing timestamp: %w", err)
 	}
 
 	// Extract CHIRP token transactions
@@ -127,12 +262,17 @@ func (s *ChirpTransactionService) processTransaction(ctx context.Context, digest
 
 	// Save to database
 	if len(chirpTxs) > 0 {
+		log.Printf("Saving %d CHIRP transaction(s) from tx %s", len(chirpTxs), digest)
+		for i, tx := range chirpTxs {
+			log.Printf("  [%d] Type: %s, Sender: %s, Recipient: %s, Amount: %s", 
+				i+1, tx.TransactionType, tx.Sender, tx.Recipient, tx.Amount)
+		}
 		if err := s.repo.CreateTransactionsBatch(ctx, chirpTxs); err != nil {
-			return fmt.Errorf("saving transactions: %w", err)
+			return 0, fmt.Errorf("saving transactions: %w", err)
 		}
 	}
 
-	return nil
+	return len(chirpTxs), nil
 }
 
 func (s *ChirpTransactionService) extractChirpTransactions(txBlock *blockchain.TransactionBlock, checkpoint uint64, timestamp time.Time) []*domain.ChirpTransaction {
@@ -147,10 +287,30 @@ func (s *ChirpTransactionService) extractChirpTransactions(txBlock *blockchain.T
 	gasFee := s.calculateGasFee(txBlock.Effects.GasUsed)
 
 	// Check balance changes for CHIRP token
+	// Only log transactions with balance changes for debugging (limit to reduce noise)
+	if len(txBlock.BalanceChanges) > 0 && checkpoint%100 == 0 {
+		// Log sample transactions to see what tokens are being processed
+		log.Printf("Sample TX %s has %d balance changes. Looking for CHIRP token: %s", txBlock.Digest[:16], len(txBlock.BalanceChanges), s.chirpToken)
+		for i, balanceChange := range txBlock.BalanceChanges {
+			if i < 2 { // Log first 2 balance changes for debugging
+				log.Printf("  Balance change %d: CoinType=%s, Amount=%s", i, balanceChange.CoinType, balanceChange.Amount)
+			}
+		}
+	}
+	
 	for _, balanceChange := range txBlock.BalanceChanges {
-		if !strings.Contains(balanceChange.CoinType, s.chirpToken) {
+		// Check if this is a CHIRP token (case-insensitive and check for "chirp" keyword)
+		coinTypeLower := strings.ToLower(balanceChange.CoinType)
+		chirpTokenLower := strings.ToLower(s.chirpToken)
+		
+		isChirp := strings.Contains(coinTypeLower, chirpTokenLower) || 
+		           strings.Contains(coinTypeLower, "::chirp::")
+		
+		if !isChirp {
 			continue
 		}
+		
+		log.Printf("✓ FOUND CHIRP TRANSACTION! TX: %s, CoinType: %s, Amount: %s", txBlock.Digest, balanceChange.CoinType, balanceChange.Amount)
 
 		recipient := s.extractOwnerAddress(balanceChange.Owner)
 		amount := balanceChange.Amount

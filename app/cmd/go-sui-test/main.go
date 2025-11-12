@@ -59,20 +59,29 @@ func main() {
 		suiClient,
 		blockchainInfo.ChirpCurrency,
 		blockchainInfo.ClaimAddress,
+		cfg.Sync.InitialSyncDays,
+		cfg.Monitoring.Addresses,
 	)
+	
+	log.Printf("Configured monitoring addresses: %d", len(cfg.Monitoring.Addresses))
 
 	// Start background sync (optional - can be triggered via API)
-	go func() {
-		ticker := time.NewTicker(cfg.Sync.Interval)
-		defer ticker.Stop()
+	if cfg.Sync.Interval > 0 {
+		go func() {
+			ticker := time.NewTicker(cfg.Sync.Interval)
+			defer ticker.Stop()
 
-		for range ticker.C {
-			log.Println("Running scheduled transaction sync...")
-			if err := txService.SyncTransactions(context.Background()); err != nil {
-				log.Printf("Sync error: %v", err)
+			log.Printf("Background sync enabled with interval: %v", cfg.Sync.Interval)
+			for range ticker.C {
+				log.Println("Running scheduled transaction sync...")
+				if err := txService.SyncTransactions(context.Background()); err != nil {
+					log.Printf("Sync error: %v", err)
+				}
 			}
-		}
-	}()
+		}()
+	} else {
+		log.Println("Background sync disabled (interval not configured or zero)")
+	}
 
 	// Start gRPC server
 	grpcServer := initGRPCServer(cfg, txService)

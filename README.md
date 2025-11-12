@@ -64,6 +64,25 @@ docker-compose up -d
 cp app/config/config.yaml.example app/config/config.yaml
 ```
 
+Важные параметры в `config.yaml`:
+- `sync.interval` - интервал автоматической синхронизации (например, "5m")
+- `sync.initial_sync_days` - количество дней для начальной синхронизации (1 = последний день, 0 = весь блокчейн)
+- `sync.batch_size` - размер батча для обработки checkpoints
+- `monitoring.addresses` - список SUI адресов для мониторинга CHIRP транзакций
+
+Пример конфигурации адресов:
+```yaml
+monitoring:
+  addresses:
+    - "0x1234567890abcdef..."  # Адрес кошелька 1
+    - "0xabcdef1234567890..."  # Адрес кошелька 2
+```
+
+Или через переменную окружения:
+```bash
+export MONITORING_ADDRESSES="0xaddr1,0xaddr2,0xaddr3"
+```
+
 ### 3. Генерация protobuf кода
 
 ```bash

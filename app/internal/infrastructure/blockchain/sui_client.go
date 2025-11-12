@@ -21,7 +21,7 @@ func NewSuiClient(rpcURL string) *SuiClient {
 	return &SuiClient{
 		rpcURL: rpcURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second, // Increased timeout for slow responses
 		},
 	}
 }
@@ -67,16 +67,25 @@ func (c *SuiClient) GetBlockchainInfo(ctx context.Context) (*domain.BlockchainIn
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
+	fmt.Printf("DEBUG: Full CHIRP token from API: '%s'\n", info.ChirpCurrency)
 	return &info, nil
 }
 
-// QueryTransactionsByAddress queries transactions for a specific address
+// QueryTransactionsByAddress queries transactions FROM a specific address
 func (c *SuiClient) QueryTransactionsByAddress(ctx context.Context, address string, cursor *string, limit int) (*TransactionQueryResponse, error) {
+	return c.queryTransactionsByFilter(ctx, map[string]interface{}{"FromAddress": address}, cursor, limit)
+}
+
+// QueryTransactionsToAddress queries transactions TO a specific address
+func (c *SuiClient) QueryTransactionsToAddress(ctx context.Context, address string, cursor *string, limit int) (*TransactionQueryResponse, error) {
+	return c.queryTransactionsByFilter(ctx, map[string]interface{}{"ToAddress": address}, cursor, limit)
+}
+
+// queryTransactionsByFilter is a generic method to query transactions with a filter
+func (c *SuiClient) queryTransactionsByFilter(ctx context.Context, filter map[string]interface{}, cursor *string, limit int) (*TransactionQueryResponse, error) {
 	params := []interface{}{
 		map[string]interface{}{
-			"filter": map[string]interface{}{
-				"FromAddress": address,
-			},
+			"filter": filter,
 			"options": map[string]interface{}{
 				"showInput":          true,
 				"showEffects":        true,
@@ -140,9 +149,14 @@ func (c *SuiClient) GetLatestCheckpoint(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	var checkpoint uint64
-	if err := json.Unmarshal(result, &checkpoint); err != nil {
+	var checkpointStr string
+	if err := json.Unmarshal(result, &checkpointStr); err != nil {
 		return 0, fmt.Errorf("unmarshaling checkpoint: %w", err)
+	}
+
+	var checkpoint uint64
+	if _, err := fmt.Sscanf(checkpointStr, "%d", &checkpoint); err != nil {
+		return 0, fmt.Errorf("parsing checkpoint number: %w", err)
 	}
 
 	return checkpoint, nil
@@ -168,46 +182,62 @@ func (c *SuiClient) GetCheckpoint(ctx context.Context, sequenceNumber uint64) (*
 }
 
 func (c *SuiClient) makeRPCCall(ctx context.Context, method string, params []interface{}) (json.RawMessage, error) {
-	reqBody := JSONRPCRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		Params:  params,
-		ID:      1,
+	var lastErr error
+	maxRetries := 3
+	retryDelay := 2 * time.Second
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			fmt.Printf("Retrying RPC call %s (attempt %d/%d) after error: %v\n", method, attempt+1, maxRetries, lastErr)
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
+
+		reqBody := JSONRPCRequest{
+			JSONRPC: "2.0",
+			Method:  method,
+			Params:  params,
+			ID:      1,
+		}
+
+		jsonData, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.rpcURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("making RPC call: %w", err)
+			continue // Retry on network errors
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("reading response: %w", err)
+			continue
+		}
+
+		var rpcResp JSONRPCResponse
+		if err := json.Unmarshal(body, &rpcResp); err != nil {
+			return nil, fmt.Errorf("unmarshaling response: %w", err)
+		}
+
+		if rpcResp.Error != nil {
+			return nil, fmt.Errorf("RPC error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		}
+
+		return rpcResp.Result, nil
 	}
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.rpcURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("making RPC call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	var rpcResp JSONRPCResponse
-	if err := json.Unmarshal(body, &rpcResp); err != nil {
-		return nil, fmt.Errorf("unmarshaling response: %w", err)
-	}
-
-	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("RPC error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
-	}
-
-	return rpcResp.Result, nil
+	return nil, fmt.Errorf("failed after %d attempts: %w", maxRetries, lastErr)
 }
 
 // TransactionQueryResponse represents the response from suix_queryTransactionBlocks

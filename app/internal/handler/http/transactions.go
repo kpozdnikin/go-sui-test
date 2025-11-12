@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -75,12 +76,15 @@ func (h *TransactionsHTTPHandler) GetWeeklyStatistics(w http.ResponseWriter, r *
 		return
 	}
 
+	log.Println("HTTP: GetWeeklyStatistics request received")
 	stats, err := h.service.GetWeeklyStatistics(r.Context())
 	if err != nil {
+		log.Printf("HTTP: GetWeeklyStatistics error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("HTTP: GetWeeklyStatistics response: %+v", stats)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }
@@ -111,12 +115,15 @@ func (h *TransactionsHTTPHandler) GetStatistics(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	log.Printf("HTTP: GetStatistics request for period %s to %s", start.Format(time.RFC3339), end.Format(time.RFC3339))
 	stats, err := h.service.GetStatistics(r.Context(), start, end)
 	if err != nil {
+		log.Printf("HTTP: GetStatistics error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("HTTP: GetStatistics response: %+v", stats)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }
@@ -127,6 +134,7 @@ func (h *TransactionsHTTPHandler) SyncTransactions(w http.ResponseWriter, r *htt
 		return
 	}
 
+	log.Println("HTTP: Manual sync triggered via API")
 	err := h.service.SyncTransactions(r.Context())
 	
 	response := map[string]interface{}{
@@ -134,9 +142,11 @@ func (h *TransactionsHTTPHandler) SyncTransactions(w http.ResponseWriter, r *htt
 	}
 
 	if err != nil {
+		log.Printf("HTTP: Sync failed: %v", err)
 		response["message"] = err.Error()
 		w.WriteHeader(http.StatusInternalServerError)
 	} else {
+		log.Println("HTTP: Sync completed successfully")
 		response["message"] = "Synchronization completed successfully"
 	}
 
