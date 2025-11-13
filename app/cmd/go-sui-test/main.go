@@ -28,6 +28,7 @@ import (
 func main() {
 	// Load configuration
 	cfg, err := config.GetConfig("config/config.yaml")
+
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -36,6 +37,7 @@ func main() {
 
 	// Initialize database
 	db, err := initDatabase(cfg)
+
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -43,6 +45,7 @@ func main() {
 	// Get blockchain info
 	suiClient := blockchain.NewSuiClient("https://fullnode.mainnet.sui.io:443")
 	blockchainInfo, err := suiClient.GetBlockchainInfo(context.Background())
+
 	if err != nil {
 		log.Fatalf("Failed to get blockchain info: %v", err)
 	}
@@ -72,8 +75,10 @@ func main() {
 			defer ticker.Stop()
 
 			log.Printf("Background sync enabled with interval: %v", cfg.Sync.Interval)
+			
 			for range ticker.C {
 				log.Println("Running scheduled transaction sync...")
+				
 				if err := txService.SyncTransactions(context.Background()); err != nil {
 					log.Printf("Sync error: %v", err)
 				}
@@ -85,6 +90,7 @@ func main() {
 
 	// Start gRPC server
 	grpcServer := initGRPCServer(cfg, txService)
+
 	go func() {
 		lis, err := net.Listen("tcp", cfg.GRPC.Port)
 		if err != nil {
@@ -92,6 +98,7 @@ func main() {
 		}
 
 		log.Printf("gRPC server listening on %s", cfg.GRPC.Port)
+
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("Failed to serve gRPC: %v", err)
 		}
@@ -99,6 +106,7 @@ func main() {
 
 	// Start HTTP server
 	httpServer := initHTTPServer(cfg, txService)
+
 	go func() {
 		log.Printf("HTTP server listening on %s", cfg.HTTP.Port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -108,7 +116,9 @@ func main() {
 
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
+
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	<-quit
 
 	log.Println("Shutting down servers...")
@@ -117,7 +127,9 @@ func main() {
 	grpcServer.GracefulStop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
 	defer cancel()
+
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
@@ -137,11 +149,13 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	)
 
 	db, err := gormdb.NewDB(postgres.Open(dsn), &gorm.Config{})
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	log.Println("Database connected and migrated successfully")
+	
 	return db, nil
 }
 

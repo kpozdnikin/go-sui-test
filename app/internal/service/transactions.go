@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kpozdnikin/go-sui-test/app/internal/domain"
@@ -118,11 +119,12 @@ func (s *ChirpTransactionService) buildMonitoringAddressList() []string {
 	return addresses
 }
 
-// syncTransactionsByAddress syncs transactions for a specific address
+// syncTransactionsByAddress syncs transactions for a specific address using parallel processing
 func (s *ChirpTransactionService) syncTransactionsByAddress(ctx context.Context, address string, isFrom bool) (int, error) {
 	var cursor *string
 	totalCount := 0
 	limit := 50
+	const batchSize = 10 // Process 10 transactions in parallel
 
 	for {
 		// Query transactions
@@ -140,44 +142,20 @@ func (s *ChirpTransactionService) syncTransactionsByAddress(ctx context.Context,
 			return totalCount, fmt.Errorf("querying transactions: %w", err)
 		}
 
-		// Process each transaction
-		for _, txBlock := range response.Data {
-			// Check if already exists
-			existing, err := s.repo.GetTransactionByDigest(ctx, txBlock.Digest)
+		// Process transactions in batches
+		for i := 0; i < len(response.Data); i += batchSize {
+			end := i + batchSize
+			if end > len(response.Data) {
+				end = len(response.Data)
+			}
+			batch := response.Data[i:end]
+			
+			// Process batch in parallel
+			count, err := s.processBatchParallel(ctx, batch)
 			if err != nil {
-				log.Printf("ERROR: Failed to check existing transaction %s: %v", txBlock.Digest, err)
-				continue
-			}
-			if existing != nil {
-				continue // Already processed
-			}
-
-			// Parse timestamp
-			var timestamp time.Time
-			if txBlock.TimestampMs != nil {
-				timestamp, err = s.parseTimestamp(*txBlock.TimestampMs)
-				if err != nil {
-					log.Printf("ERROR: Failed to parse timestamp for %s: %v", txBlock.Digest, err)
-					continue
-				}
-			}
-
-			// Extract CHIRP transactions
-			var checkpoint uint64
-			if txBlock.Checkpoint != nil {
-				fmt.Sscanf(*txBlock.Checkpoint, "%d", &checkpoint)
-			}
-			
-			chirpTxs := s.extractChirpTransactions(&txBlock, checkpoint, timestamp)
-			
-			// Save to database
-			if len(chirpTxs) > 0 {
-				log.Printf("Saving %d CHIRP transaction(s) from tx %s", len(chirpTxs), txBlock.Digest)
-				if err := s.repo.CreateTransactionsBatch(ctx, chirpTxs); err != nil {
-					log.Printf("ERROR: Failed to save transactions: %v", err)
-				} else {
-					totalCount += len(chirpTxs)
-				}
+				log.Printf("ERROR: Failed to process batch: %v", err)
+			} else {
+				totalCount += count
 			}
 		}
 
@@ -192,6 +170,69 @@ func (s *ChirpTransactionService) syncTransactionsByAddress(ctx context.Context,
 	}
 
 	return totalCount, nil
+}
+
+// processBatchParallel processes a batch of transactions in parallel using WaitGroup
+func (s *ChirpTransactionService) processBatchParallel(ctx context.Context, batch []blockchain.TransactionBlock) (int, error) {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allChirpTxs := make([]*domain.ChirpTransaction, 0)
+	
+	// Process each transaction in parallel
+	for _, txBlock := range batch {
+		wg.Add(1)
+		go func(tx blockchain.TransactionBlock) {
+			defer wg.Done()
+			
+			// Check if already exists
+			existing, err := s.repo.GetTransactionByDigest(ctx, tx.Digest)
+			if err != nil {
+				log.Printf("ERROR: Failed to check existing transaction %s: %v", tx.Digest, err)
+				return
+			}
+			if existing != nil {
+				return // Already processed
+			}
+
+			// Parse timestamp
+			var timestamp time.Time
+			if tx.TimestampMs != nil {
+				timestamp, err = s.parseTimestamp(*tx.TimestampMs)
+				if err != nil {
+					log.Printf("ERROR: Failed to parse timestamp for %s: %v", tx.Digest, err)
+					return
+				}
+			}
+
+			// Extract CHIRP transactions
+			var checkpoint uint64
+			if tx.Checkpoint != nil {
+				fmt.Sscanf(*tx.Checkpoint, "%d", &checkpoint)
+			}
+			
+			chirpTxs := s.extractChirpTransactions(&tx, checkpoint, timestamp)
+			
+			// Add to collection (thread-safe)
+			if len(chirpTxs) > 0 {
+				mu.Lock()
+				allChirpTxs = append(allChirpTxs, chirpTxs...)
+				mu.Unlock()
+			}
+		}(txBlock)
+	}
+	
+	// Wait for all goroutines to complete
+	wg.Wait()
+	
+	// Save all collected transactions in one batch
+	if len(allChirpTxs) > 0 {
+		log.Printf("Saving batch of %d CHIRP transaction(s) to database", len(allChirpTxs))
+		if err := s.repo.CreateTransactionsBatch(ctx, allChirpTxs); err != nil {
+			return 0, fmt.Errorf("saving transactions batch: %w", err)
+		}
+	}
+	
+	return len(allChirpTxs), nil
 }
 
 // queryTransactionsToAddress queries transactions TO a specific address
