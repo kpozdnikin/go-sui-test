@@ -5,9 +5,12 @@ services:
       - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:z,ro
       - db-data:/var/lib/postgresql/data
     environment:
-      POSTGRES_PASSWORD: "admin"
+      POSTGRES_PASSWORD: "${POSTGRES_ADMIN_PASSWORD:-admin}"
+      POSTGRES_USER: "${POSTGRES_ADMIN_USER:-postgres}"
     ports:
       - "5432:5432"
+    env_file:
+      - .env
 volumes:
   db-data:
   datastore:

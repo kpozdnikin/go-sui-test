@@ -61,33 +61,41 @@ docker-compose up -d
 
 ### 2. Настройка конфигурации
 
-Скопируйте пример конфигурации:
+Скопируйте примеры конфигурации:
 
 ```bash
 cp app/config/config.yaml.example app/config/config.yaml
+cp .env.example .env
 ```
 
-Важные параметры в `config.yaml`:
-- `sync.interval` - интервал автоматической синхронизации (например, "5m")
-- `sync.batch_size` - размер батча для обработки checkpoints (рекомендуется 100-500)
-- `sync.max_workers` - максимальное количество горутин для параллельной обработки транзакций
-- `sync.worker_timeout` - таймаут для обработки одного батча транзакций
+**Важно**: Все секреты должны быть в `.env` файле, а не в `config.yaml`!
 
-Пример полной конфигурации:
-```yaml
-sync:
-  interval: "5m"
-  batch_size: 200
-  max_workers: 10
-  worker_timeout: "30s"
+Отредактируйте `.env` файл:
+```bash
+# Database Configuration (ОБЯЗАТЕЛЬНО)
+POSTGRESQL_USER=your_db_user
+POSTGRESQL_PASSWORD=your_secure_password
+POSTGRESQL_DBNAME=transactions
 
-postgresql:
-  host: "localhost"
-  port: "5432"
-  user: "gwuser"
-  password: "gwpass"
-  dbname: "transactions"
-  sslmode: "disable"
+# Optional: Override defaults
+SYNC_BATCH_SIZE=200
+SYNC_MAX_WORKERS=10
+```
+
+Важные параметры:
+- `POSTGRESQL_*` - **обязательные** переменные для подключения к БД
+- `SYNC_BATCH_SIZE` - размер батча для обработки checkpoints (100-500)
+- `SYNC_MAX_WORKERS` - количество горутин для параллельной обработки (5-20)
+- `SYNC_WORKER_TIMEOUT` - таймаут для обработки батча (15s-60s)
+
+Пример `.env` файла:
+```bash
+POSTGRESQL_USER=chirp_user
+POSTGRESQL_PASSWORD=super_secure_password_123
+POSTGRESQL_DBNAME=chirp_transactions
+SYNC_BATCH_SIZE=200
+SYNC_MAX_WORKERS=10
+SYNC_WORKER_TIMEOUT=30s
 ```
 
 ### 3. Генерация protobuf кода
@@ -154,22 +162,31 @@ POST /api/v1/sync
 ## Установка и запуск (Windows)
 
 ```cmd
-REM 1. Создать конфиг
+REM 1. Создать конфигурационные файлы
 copy app\config\config.yaml.example app\config\config.yaml
+copy .env.example .env
 
-REM 2. Запустить PostgreSQL
+REM 2. Отредактировать .env файл (установить пароли БД)
+notepad .env
+
+REM 3. Запустить PostgreSQL
 docker-compose up -d
 
-REM 3. Сгенерировать protobuf (из корня проекта)
+REM 4. Сгенерировать protobuf (из корня проекта)
 buf generate
 
-REM 4. Перейти в папку app и установить зависимости
+REM 5. Перейти в папку app и установить зависимости
 cd app
 go mod tidy
 
-REM 5. Запустить сервис
+REM 6. Запустить сервис
 go run cmd\go-sui-test\main.go
 ```
+
+**Обязательно**: Отредактируйте `.env` файл и установите реальные значения для:
+- `POSTGRESQL_USER`
+- `POSTGRESQL_PASSWORD` 
+- `POSTGRESQL_DBNAME`
 
 #### Health check
 
@@ -232,4 +249,41 @@ sync:
 2024/11/17 16:57:00 Processing checkpoint batch 1000-1199 with 10 workers
 2024/11/17 16:57:15 Batch 1000-1199 completed: 45 CHIRP transactions found
 2024/11/17 16:57:15 Sync completed: processed 200 checkpoints in 15.2s
+```
+
+## Безопасность
+
+### Переменные окружения
+
+**Все секреты должны храниться в переменных окружения, а НЕ в config файлах!**
+
+Обязательные переменные:
+- `POSTGRESQL_USER` - пользователь БД
+- `POSTGRESQL_PASSWORD` - пароль БД (используйте сложный пароль!)
+- `POSTGRESQL_DBNAME` - название базы данных
+
+### Файлы, которые НЕ должны попадать в git:
+
+- `.env` - содержит реальные секреты
+- `app/config/config.yaml` - может содержать локальные настройки
+- `*.log` - логи могут содержать чувствительную информацию
+
+### Рекомендации по безопасности:
+
+1. **Используйте сложные пароли** для БД (минимум 16 символов)
+2. **Ограничьте доступ к БД** только с localhost или конкретных IP
+3. **Регулярно ротируйте пароли** в production среде
+4. **Используйте HTTPS** для HTTP API в production
+5. **Настройте TLS** для gRPC в production
+
+### Production deployment:
+
+```bash
+# Установите переменные окружения в системе
+export POSTGRESQL_PASSWORD="very_secure_password_123!"
+export POSTGRESQL_USER="chirp_prod_user"
+export POSTGRESQL_DBNAME="chirp_production"
+
+# Запустите сервис
+./chirp-transactions-service
 ```

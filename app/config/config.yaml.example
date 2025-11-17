@@ -12,18 +12,13 @@ http:
 postgresql:
   host: "localhost"
   port: "5432"
-  user: "gwuser"
-  password: "gwpass"
-  dbname: "transactions"
+  user: ""          # Set via POSTGRESQL_USER env var
+  password: ""      # Set via POSTGRESQL_PASSWORD env var
+  dbname: ""        # Set via POSTGRESQL_DBNAME env var
   sslmode: "disable"
 
 sync:
   interval: "5m"
   batch_size: 100
-  initial_sync_days: 1  # Number of days to sync on first run (0 = sync entire blockchain)
-
-monitoring:
-  addresses:
-    - "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"  # Example address 1
-    - "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"  # Example address 2
-  # Or use ENV: MONITORING_ADDRESSES="0xaddr1,0xaddr2,0xaddr3"
+  max_workers: 10
+  worker_timeout: "30s"
