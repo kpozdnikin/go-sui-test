@@ -225,9 +225,20 @@ func (c *SuiClient) makeRPCCall(ctx context.Context, method string, params []int
 			continue
 		}
 
+		// Check for non-200 status codes
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			continue // Retry on server errors
+		}
+
 		var rpcResp JSONRPCResponse
 		if err := json.Unmarshal(body, &rpcResp); err != nil {
-			return nil, fmt.Errorf("unmarshaling response: %w", err)
+			// Log the raw response for debugging
+			bodyPreview := string(body)
+			if len(bodyPreview) > 200 {
+				bodyPreview = bodyPreview[:200] + "..."
+			}
+			return nil, fmt.Errorf("unmarshaling response: %w (body preview: %s)", err, bodyPreview)
 		}
 
 		if rpcResp.Error != nil {

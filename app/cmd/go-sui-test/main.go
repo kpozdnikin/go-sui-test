@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/kpozdnikin/go-sui-test/app/internal/config"
 	grpcHandler "github.com/kpozdnikin/go-sui-test/app/internal/handler/grpc"
@@ -64,6 +65,8 @@ func main() {
 		blockchainInfo.ClaimAddress,
 		cfg.Sync.InitialSyncDays,
 		cfg.Monitoring.Addresses,
+		cfg.Sync.Limit,
+		cfg.Sync.BatchSize,
 	)
 	
 	log.Printf("Configured monitoring addresses: %d", len(cfg.Monitoring.Addresses))
@@ -148,7 +151,17 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		cfg.PostgreSQL.SSLMode,
 	)
 
-	db, err := gormdb.NewDB(postgres.Open(dsn), &gorm.Config{})
+	db, err := gormdb.NewDB(postgres.Open(dsn), &gorm.Config{
+		Logger: gormlogger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			gormlogger.Config{
+				SlowThreshold:             time.Second,
+				LogLevel:                  gormlogger.Error,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  true,
+			},
+		),
+	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

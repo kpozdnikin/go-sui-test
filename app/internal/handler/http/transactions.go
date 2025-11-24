@@ -23,6 +23,7 @@ func NewTransactionsHTTPHandler(service *service.ChirpTransactionService) *Trans
 func (h *TransactionsHTTPHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/transactions/address", h.GetTransactionsByAddress)
 	mux.HandleFunc("/api/v1/statistics/weekly", h.GetWeeklyStatistics)
+	mux.HandleFunc("/api/v1/statistics/all", h.GetAllTimeStatistics)
 	mux.HandleFunc("/api/v1/statistics", h.GetStatistics)
 	mux.HandleFunc("/api/v1/sync", h.SyncTransactions)
 	mux.HandleFunc("/health", h.HealthCheck)
@@ -85,6 +86,25 @@ func (h *TransactionsHTTPHandler) GetWeeklyStatistics(w http.ResponseWriter, r *
 	}
 
 	log.Printf("HTTP: GetWeeklyStatistics response: %+v", stats)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (h *TransactionsHTTPHandler) GetAllTimeStatistics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	log.Println("HTTP: GetAllTimeStatistics request received")
+	stats, err := h.service.GetAllTimeStatistics(r.Context())
+	if err != nil {
+		log.Printf("HTTP: GetAllTimeStatistics error: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("HTTP: GetAllTimeStatistics response: %+v", stats)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }

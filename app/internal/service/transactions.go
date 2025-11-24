@@ -22,6 +22,8 @@ type ChirpTransactionService struct {
 	claimAddr          string
 	initialSyncDays    int
 	monitoringAddresses []string
+	pageLimit          int
+	batchSize          int
 }
 
 func NewChirpTransactionService(
@@ -31,6 +33,8 @@ func NewChirpTransactionService(
 	claimAddr string,
 	initialSyncDays int,
 	monitoringAddresses []string,
+	pageLimit int,
+	batchSize int,
 ) *ChirpTransactionService {
 	return &ChirpTransactionService{
 		repo:               repo,
@@ -39,6 +43,8 @@ func NewChirpTransactionService(
 		claimAddr:          claimAddr,
 		initialSyncDays:    initialSyncDays,
 		monitoringAddresses: monitoringAddresses,
+		pageLimit:          pageLimit,
+		batchSize:          batchSize,
 	}
 }
 
@@ -93,11 +99,11 @@ func (s *ChirpTransactionService) SyncTransactions(ctx context.Context) error {
 func (s *ChirpTransactionService) buildMonitoringAddressList() []string {
 	addresses := make([]string, 0)
 	
-	// Add claim address if not empty
-	if s.claimAddr != "" {
-		addresses = append(addresses, s.claimAddr)
-	}
-	
+	//Add claim address if not empty
+	//if s.claimAddr != "" {
+	//	addresses = append(addresses, s.claimAddr)
+	//}
+
 	// Add configured monitoring addresses
 	for _, addr := range s.monitoringAddresses {
 		// Skip empty addresses and duplicates
@@ -123,8 +129,14 @@ func (s *ChirpTransactionService) buildMonitoringAddressList() []string {
 func (s *ChirpTransactionService) syncTransactionsByAddress(ctx context.Context, address string, isFrom bool) (int, error) {
 	var cursor *string
 	totalCount := 0
-	limit := 50
-	const batchSize = 10 // Process 10 transactions in parallel
+	limit := s.pageLimit
+	if limit <= 0 {
+		limit = 5000
+	}
+	batchSize := s.batchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
 
 	for {
 		// Query transactions
@@ -224,15 +236,34 @@ func (s *ChirpTransactionService) processBatchParallel(ctx context.Context, batc
 	// Wait for all goroutines to complete
 	wg.Wait()
 	
+	// Deduplicate by digest before saving
+	uniqueTxs := s.deduplicateTransactions(allChirpTxs)
+	
 	// Save all collected transactions in one batch
-	if len(allChirpTxs) > 0 {
-		log.Printf("Saving batch of %d CHIRP transaction(s) to database", len(allChirpTxs))
-		if err := s.repo.CreateTransactionsBatch(ctx, allChirpTxs); err != nil {
+	if len(uniqueTxs) > 0 {
+		log.Printf("Saving batch of %d CHIRP transaction(s) to database (deduplicated from %d)", len(uniqueTxs), len(allChirpTxs))
+		if err := s.repo.CreateTransactionsBatch(ctx, uniqueTxs); err != nil {
 			return 0, fmt.Errorf("saving transactions batch: %w", err)
 		}
 	}
 	
-	return len(allChirpTxs), nil
+	return len(uniqueTxs), nil
+}
+
+// deduplicateTransactions removes duplicate transactions by digest, keeping the first occurrence
+func (s *ChirpTransactionService) deduplicateTransactions(txs []*domain.ChirpTransaction) []*domain.ChirpTransaction {
+	seen := make(map[string]bool)
+	unique := make([]*domain.ChirpTransaction, 0, len(txs))
+	
+	for _, tx := range txs {
+		key := tx.Digest + "|" + tx.Recipient + "|" + tx.Amount + "|" + tx.TransactionType
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, tx)
+		}
+	}
+	
+	return unique
 }
 
 // queryTransactionsToAddress queries transactions TO a specific address
@@ -340,6 +371,7 @@ func (s *ChirpTransactionService) extractChirpTransactions(txBlock *blockchain.T
 	}
 	
 	for _, balanceChange := range txBlock.BalanceChanges {
+		log.Printf("TX %s BalanceChange: CoinType=%s, Amount=%s", txBlock.Digest, balanceChange.CoinType, balanceChange.Amount)
 		// Check if this is a CHIRP token (case-insensitive and check for "chirp" keyword)
 		coinTypeLower := strings.ToLower(balanceChange.CoinType)
 		chirpTokenLower := strings.ToLower(s.chirpToken)
@@ -454,6 +486,14 @@ func (s *ChirpTransactionService) GetTransactionsByAddress(ctx context.Context, 
 func (s *ChirpTransactionService) GetWeeklyStatistics(ctx context.Context) (*domain.TokenStatistics, error) {
 	end := time.Now()
 	start := end.AddDate(0, 0, -7) // 7 days ago
+
+	return s.repo.GetStatistics(ctx, start, end)
+}
+
+// GetAllTimeStatistics retrieves statistics for the entire history
+func (s *ChirpTransactionService) GetAllTimeStatistics(ctx context.Context) (*domain.TokenStatistics, error) {
+	end := time.Now()
+	start := time.Time{}
 
 	return s.repo.GetStatistics(ctx, start, end)
 }

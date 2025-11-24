@@ -45,6 +45,7 @@ type (
 		Interval              time.Duration `yaml:"interval" env:"INTERVAL"`
 		BatchSize             int           `yaml:"batch_size" env:"BATCH_SIZE"`
 		InitialSyncDays       int           `yaml:"initial_sync_days" env:"INITIAL_SYNC_DAYS"`
+		Limit                 int           `yaml:"limit" env:"LIMIT"`
 	}
 
 	Monitoring struct {

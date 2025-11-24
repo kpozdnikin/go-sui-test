@@ -214,7 +214,12 @@ func (r *ChirpTransactionRepository) GetStatistics(ctx context.Context, start, e
 		case "buy":
 			stats.TotalBought = result.TotalAmount
 		case "sell":
-			stats.TotalSold = result.TotalAmount
+			// amounts for sells may be stored as negative values, but statistics expect positive volume
+			if len(result.TotalAmount) > 0 && result.TotalAmount[0] == '-' {
+				stats.TotalSold = result.TotalAmount[1:]
+			} else {
+				stats.TotalSold = result.TotalAmount
+			}
 		}
 	}
 
