@@ -52,45 +52,44 @@ func NewChirpTransactionService(
 func (s *ChirpTransactionService) SyncTransactions(ctx context.Context) error {
 	syncStart := time.Now()
 	log.Println("========================================")
-	log.Println("Starting transaction synchronization using address-based query...")
-	
-	// Build list of addresses to monitor
-	addressesToMonitor := s.buildMonitoringAddressList()
-	log.Printf("Monitoring %d addresses:", len(addressesToMonitor))
-	for i, addr := range addressesToMonitor {
-		log.Printf("  %d. %s", i+1, addr)
+	log.Println("Starting transaction synchronization using checkpoint-based sync...")
+
+	// Determine last processed checkpoint from database
+	lastCheckpoint, err := s.repo.GetLatestCheckpoint(ctx)
+	if err != nil {
+		return fmt.Errorf("getting latest checkpoint from database: %w", err)
+	}
+	log.Printf("Last checkpoint in database: %d", lastCheckpoint)
+
+	// Get latest checkpoint from blockchain
+	latestCheckpoint, err := s.suiClient.GetLatestCheckpoint(ctx)
+	if err != nil {
+		return fmt.Errorf("getting latest checkpoint from blockchain: %w", err)
+	}
+	log.Printf("Latest checkpoint on blockchain: %d", latestCheckpoint)
+
+	// Determine range to sync
+	startCheckpoint := lastCheckpoint
+	if lastCheckpoint > 0 {
+		startCheckpoint = lastCheckpoint + 1
 	}
 
-	totalChirpTransactions := 0
+	if startCheckpoint > latestCheckpoint {
+		log.Println("No new checkpoints to synchronize. Database is up to date.")
+		log.Println("========================================")
+		return nil
+	}
 
-	// Query transactions for each address
-	for _, address := range addressesToMonitor {
-		log.Printf("Processing address: %s", address)
-		
-		// Query transactions FROM address
-		fromCount, err := s.syncTransactionsByAddress(ctx, address, true)
-		if err != nil {
-			log.Printf("ERROR: Failed to sync FROM transactions for %s: %v", address, err)
-		} else {
-			totalChirpTransactions += fromCount
-			log.Printf("  Found %d CHIRP transactions FROM address", fromCount)
-		}
-
-		// Query transactions TO address
-		toCount, err := s.syncTransactionsByAddress(ctx, address, false)
-		if err != nil {
-			log.Printf("ERROR: Failed to sync TO transactions for %s: %v", address, err)
-		} else {
-			totalChirpTransactions += toCount
-			log.Printf("  Found %d CHIRP transactions TO address", toCount)
-		}
-		
-		log.Printf("  Total for this address: %d CHIRP transactions", fromCount+toCount)
+	log.Printf("Synchronizing checkpoints from %d to %d", startCheckpoint, latestCheckpoint)
+	totalTxCount, chirpTxCount, err := s.syncCheckpointRange(ctx, startCheckpoint, latestCheckpoint)
+	if err != nil {
+		return err
 	}
 
 	log.Printf("========================================")
 	log.Printf("Synchronization completed in %v", time.Since(syncStart))
-	log.Printf("Total CHIRP transactions saved: %d", totalChirpTransactions)
+	log.Printf("Total transactions processed: %d", totalTxCount)
+	log.Printf("Total CHIRP transactions saved: %d", chirpTxCount)
 	log.Println("========================================")
 	return nil
 }
@@ -99,10 +98,6 @@ func (s *ChirpTransactionService) SyncTransactions(ctx context.Context) error {
 func (s *ChirpTransactionService) buildMonitoringAddressList() []string {
 	addresses := make([]string, 0)
 	
-	//Add claim address if not empty
-	//if s.claimAddr != "" {
-	//	addresses = append(addresses, s.claimAddr)
-	//}
 
 	// Add configured monitoring addresses
 	for _, addr := range s.monitoringAddresses {
@@ -290,18 +285,26 @@ func (s *ChirpTransactionService) syncCheckpointRange(ctx context.Context, start
 		}
 
 		// Process each transaction in the checkpoint
+		var wg sync.WaitGroup
+		var mu sync.Mutex
 		for _, txDigest := range cpData.Transactions {
-			chirpCount, err := s.processTransaction(ctx, txDigest, checkpoint, cpData.TimestampMs)
-			if err != nil {
-				log.Printf("ERROR: Failed to process transaction %s in checkpoint %d: %v", txDigest, checkpoint, err)
-				// Continue with next transaction
-			} else {
-				chirpTxCount += chirpCount
-				if chirpCount > 0 {
-					log.Printf("Found %d CHIRP transaction(s) in tx %s", chirpCount, txDigest)
+			wg.Add(1)
+			go func(digest string) {
+				defer wg.Done()
+				chirpCount, err := s.processTransaction(ctx, digest, checkpoint, cpData.TimestampMs)
+				if err != nil {
+					log.Printf("ERROR: Failed to process transaction %s in checkpoint %d: %v", digest, checkpoint, err)
+					return
 				}
-			}
+				if chirpCount > 0 {
+					mu.Lock()
+					chirpTxCount += chirpCount
+					mu.Unlock()
+					log.Printf("Found %d CHIRP transaction(s) in tx %s", chirpCount, digest)
+				}
+			}(txDigest)
 		}
+		wg.Wait()
 	}
 
 	return totalTxCount, chirpTxCount, nil
