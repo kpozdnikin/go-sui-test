@@ -36,16 +36,6 @@ jobs:
         with:
           go-version: '1.23'
 
-      - name: Install golangci-lint
-        run: |
-          cd app
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.54.2
-
-      - name: Run golangci-lint
-        run: |
-          cd app
-          $(go env GOPATH)/bin/golangci-lint run --timeout=5m ./...
-
       - name: Install buf
         run: |
           curl -sSL https://github.com/bufbuild/buf/releases/download/v1.28.1/buf-Linux-x86_64 -o /tmp/buf
@@ -95,6 +85,17 @@ jobs:
           POSTGRESQL_SSLMODE: disable
           POSTGRES_ADMIN_USER: postgres
           POSTGRES_ADMIN_PASSWORD: admin
+
+      - name: Run basic linting with go vet
+        run: |
+          cd app
+          go vet ./...
+
+      - name: Run staticcheck (alternative to golangci-lint)
+        run: |
+          cd app
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          $(go env GOPATH)/bin/staticcheck ./...
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
