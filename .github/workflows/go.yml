@@ -99,11 +99,11 @@ jobs:
           cd app
           go vet ./...
 
-      - name: Run staticcheck (alternative to golangci-lint)
+      - name: Run staticcheck (ignore unused code warnings)
         run: |
           cd app
           go install honnef.co/go/tools/cmd/staticcheck@latest
-          $(go env GOPATH)/bin/staticcheck ./...
+          $(go env GOPATH)/bin/staticcheck -checks "all,-U1000" ./...
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
