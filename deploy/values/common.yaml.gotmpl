@@ -1,0 +1,16 @@
+extraEnvFrom:
+  - secretRef:
+      name: {{ .Release.Name }}
+
+externalSecrets:
+  {{ .Release.Name }}:
+    secretStoreName: vault
+    path: kubernetes/{{ .Environment.Name }}/go-sui-test
+    properties:
+    # Database config
+      POSTGRESQL_HOST: POSTGRESQL_HOST
+      POSTGRESQL_PORT: POSTGRESQL_PORT
+      POSTGRESQL_USER: POSTGRESQL_USER
+      POSTGRESQL_PASSWORD: POSTGRESQL_PASSWORD
+      POSTGRESQL_DBNAME: POSTGRESQL_DBNAME
+      POSTGRESQL_SSLMODE: POSTGRESQL_SSLMODE

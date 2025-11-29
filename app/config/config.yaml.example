@@ -1,0 +1,24 @@
+app:
+  name: "chirp-transactions-service"
+  version: "1.0.0"
+
+grpc:
+  port: ":50051"
+  enable_reflection: true
+
+http:
+  port: ":8080"
+
+postgresql:
+  host: "localhost"
+  port: "5432"
+  user: ""          # Set via POSTGRESQL_USER env var
+  password: ""      # Set via POSTGRESQL_PASSWORD env var
+  dbname: ""        # Set via POSTGRESQL_DBNAME env var
+  sslmode: "disable"
+
+sync:
+  interval: "5m"
+  batch_size: 100
+  max_workers: 10
+  worker_timeout: "30s"

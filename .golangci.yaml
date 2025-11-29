@@ -1,0 +1,26 @@
+linters:
+  enable:
+    - gofmt
+    - gci
+    - revive
+    - nolintlint
+run:
+  tests: false
+issues:
+  exclude-dirs:
+    - tests
+    - deploy
+    - build
+
+linters-settings:
+  revive:
+    rules:
+      - name: var-naming
+        disabled: true
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/kpozdnikin)
+      - prefix(github.com/kpozdnikin/go-sui-test)
+    skip-generated: true

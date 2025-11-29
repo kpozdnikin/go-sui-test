@@ -1,0 +1,2 @@
+extraFileMount:
+  /config/config.yaml: {{ readFile (printf "%s/go-sui-test-config.yaml" .Environment.Name) | quote }}
