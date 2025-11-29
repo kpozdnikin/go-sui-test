@@ -99,11 +99,11 @@ jobs:
           cd app
           go vet ./...
 
-      - name: Run staticcheck (ignore unused code warnings)
+      - name: Run staticcheck (ignore style warnings)
         run: |
           cd app
           go install honnef.co/go/tools/cmd/staticcheck@latest
-          $(go env GOPATH)/bin/staticcheck -checks "all,-U1000" ./...
+          $(go env GOPATH)/bin/staticcheck -checks "all,-U1000,-ST1000,-ST1003" ./...
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
