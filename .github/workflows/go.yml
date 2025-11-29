@@ -44,7 +44,6 @@ jobs:
 
       - name: Generate protobuf code
         run: |
-          cd app
           buf generate
 
       - name: Install dependencies
